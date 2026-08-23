@@ -1,0 +1,150 @@
+{
+  "title": "TaskForge — Queue Overview",
+  "uid": "taskforge-overview",
+  "tags": ["taskforge"],
+  "timezone": "utc",
+  "editable": true,
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Active workers",
+      "description": "Worker processes that have heartbeated within three intervals. Zero means nothing is executing jobs, however healthy the API looks.",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "taskforge_active_workers", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Fleet capacity",
+      "description": "Total execution slots across live workers = sum(concurrency). The ceiling on jobs runnable at once.",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [{ "expr": "taskforge_fleet_capacity", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Pending jobs",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [{ "expr": "sum(taskforge_queue_depth{status=\"pending\"})", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Oldest pending (s)",
+      "description": "THE queue-health number. Depth alone is ambiguous — 10,000 jobs draining fast is fine. A rising oldest-pending age while workers are alive means the fleet cannot keep up.",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 60 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        }
+      },
+      "targets": [{ "expr": "taskforge_queue_oldest_pending_seconds", "refId": "A" }]
+    },
+    {
+      "type": "stat",
+      "title": "Dead-lettered (1h)",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        { "expr": "sum(increase(taskforge_jobs_dead_lettered_total[1h])) or vector(0)", "refId": "A" }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Queue depth by status",
+      "description": "Every status is always reported, including zeroes: a gauge that vanishes when a queue empties is indistinguishable from a failed scrape.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } },
+      "targets": [
+        { "expr": "taskforge_queue_depth", "legendFormat": "{{status}}", "refId": "A" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Throughput (jobs/sec)",
+      "description": "Created vs processed. Sustained created > processed is the definition of falling behind.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "ops" } },
+      "targets": [
+        { "expr": "sum(rate(taskforge_jobs_created_total[1m]))", "legendFormat": "created", "refId": "A" },
+        { "expr": "sum(rate(taskforge_jobs_processed_total{outcome=\"success\"}[1m]))", "legendFormat": "completed", "refId": "B" },
+        { "expr": "sum(rate(taskforge_jobs_processed_total{outcome=\"failure\"}[1m]))", "legendFormat": "failed", "refId": "C" },
+        { "expr": "sum(rate(taskforge_jobs_dead_lettered_total[1m]))", "legendFormat": "dead-lettered", "refId": "D" }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Job processing duration (p50 / p95 / p99)",
+      "description": "Computed from histogram buckets with histogram_quantile. Percentiles cannot be averaged across instances, which is exactly why this is a histogram and not a gauge.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(taskforge_job_processing_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(taskforge_job_processing_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(taskforge_job_processing_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Queue wait time (p50 / p95 / p99)",
+      "description": "Time from a job becoming available to a worker claiming it. This is the latency users actually feel; processing time is invisible to them by comparison.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(taskforge_job_wait_duration_seconds_bucket[5m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(taskforge_job_wait_duration_seconds_bucket[5m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(taskforge_job_wait_duration_seconds_bucket[5m])))", "legendFormat": "p99", "refId": "C" }
+      ]
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Retries and lease reclaims",
+      "description": "A non-zero reclaim rate always means a worker died holding work.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 20 },
+      "targets": [
+        { "expr": "sum(rate(taskforge_jobs_retried_total[1m]))", "legendFormat": "retries/s", "refId": "A" },
+        { "expr": "rate(taskforge_jobs_reclaimed_total[1m])", "legendFormat": "reclaimed/s", "refId": "B" }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "API request rate by status",
+      "description": "Labelled by route PATTERN, never the raw path — /api/v1/jobs/{id} is one series, whereas raw paths would be one series per job id.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 20 },
+      "targets": [
+        { "expr": "sum by (status) (rate(taskforge_http_requests_total[1m]))", "legendFormat": "{{status}}", "refId": "A" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# Provisioning the datasource as a file rather than clicking through the UI
+# means the stack comes up fully configured and the configuration is in git.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Must match prometheus.yml's scrape_interval so Grafana picks sensible
+      # default step sizes for range queries.
+      timeInterval: 5s

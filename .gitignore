@@ -1,0 +1,32 @@
+# Compiled binaries
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test and profiling output
+*.test
+*.out
+coverage.*
+*.prof
+
+# Local configuration and secrets — never commit these
+.env
+.env.local
+.env.*.local
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Go workspace files are developer-local
+go.work
+go.work.sum
+/docs

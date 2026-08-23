@@ -1,0 +1,2 @@
+# SQL migrations live here from Milestone 2.
+# Created by: make migrate-create name=create_jobs_table

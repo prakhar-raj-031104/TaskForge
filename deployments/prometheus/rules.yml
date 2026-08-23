@@ -1,0 +1,79 @@
+# Alerting rules.
+#
+# These are deliberately about SYMPTOMS the operator cares about, not about
+# internal states. "queue depth is 5000" is not an alert - a queue draining
+# quickly may well be that deep. "the oldest job has been waiting 10 minutes
+# while workers are alive" is an alert, because it means work is not moving.
+
+groups:
+  - name: taskforge-queue
+    rules:
+      # The single best queue-health signal: age, not depth.
+      - alert: QueueBacklogGrowing
+        expr: taskforge_queue_oldest_pending_seconds > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest pending job has been waiting over 5 minutes"
+          description: >-
+            Jobs are being accepted faster than the fleet drains them, or workers
+            are stuck. Check taskforge_active_workers and worker logs.
+
+      - alert: NoActiveWorkers
+        expr: taskforge_active_workers == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No worker has heartbeated recently"
+          description: >-
+            The API will keep accepting jobs but nothing will execute them.
+
+      # A non-zero reclaim rate always means a worker died holding work.
+      - alert: WorkersCrashing
+        expr: rate(taskforge_jobs_reclaimed_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs are being reclaimed from expired leases"
+          description: >-
+            Workers are dying or stalling mid-job. Every reclaimed job has
+            already run at least once, so side effects may be duplicated.
+
+      - alert: DeadLetterRateHigh
+        expr: rate(taskforge_jobs_dead_lettered_total[10m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs are entering the dead-letter queue"
+          description: >-
+            More than 6 jobs per minute have exhausted their retries. Inspect
+            GET /api/v1/dead-letter-jobs.
+
+      # p99 latency, computed from the histogram rather than stored directly.
+      - alert: JobProcessingSlow
+        expr: >-
+          histogram_quantile(0.99,
+            sum by (job_type, le) (rate(taskforge_job_processing_duration_seconds_bucket[5m]))
+          ) > 60
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 job processing time above 60s for {{ $labels.job_type }}"
+
+  - name: taskforge-api
+    rules:
+      - alert: APIErrorRateHigh
+        expr: >-
+          sum(rate(taskforge_http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(taskforge_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Over 5% of API requests are failing with 5xx"

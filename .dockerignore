@@ -1,0 +1,22 @@
+# Everything here is excluded from the build context, which keeps `docker build`
+# fast and stops local secrets from ever entering an image layer.
+
+.git
+.github
+bin/
+*.exe
+*.test
+*.out
+coverage.*
+
+# Never ship local credentials into an image.
+.env
+.env.local
+
+deployments/grafana/data/
+docs/
+*.md
+!README.md
+
+.vscode/
+.idea/

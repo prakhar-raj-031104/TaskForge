@@ -1,0 +1,201 @@
+# TaskForge full stack: PostgreSQL, API, workers, Prometheus, Grafana.
+#
+#   docker compose up -d --build          everything
+#   docker compose up -d --scale worker=5 five worker processes
+#   docker compose --profile tools run --rm migrate up
+#
+# Docker Compose reads ./.env for ${VAR} interpolation, so `make docker-up` and
+# `make run` always agree on credentials.
+
+name: taskforge
+
+# ---------------------------------------------------------------------------
+# Shared configuration
+# ---------------------------------------------------------------------------
+# YAML anchors, not a Compose feature. api and worker need an almost identical
+# environment, and duplicating it is how the two drift apart until a variable is
+# set in one and forgotten in the other.
+x-app-env: &app-env
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  # JSON inside containers: logs are read by machines here, not humans.
+  LOG_FORMAT: json
+  # `postgres`, not localhost. Inside the Compose network the database is always
+  # reachable by service name on its INTERNAL port 5432, whatever host port the
+  # postgres service publishes.
+  DB_HOST: postgres
+  DB_PORT: 5432
+  DB_USER: ${DB_USER:-taskforge}
+  DB_PASSWORD: ${DB_PASSWORD:-taskforge}
+  DB_NAME: ${DB_NAME:-taskforge}
+  DB_SSLMODE: disable
+  TZ: UTC
+
+x-app-depends: &app-depends
+  postgres:
+    condition: service_healthy
+
+services:
+  # -------------------------------------------------------------------------
+  # PostgreSQL — the only source of truth
+  # -------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskforge-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-taskforge}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-taskforge}
+      POSTGRES_DB: ${DB_NAME:-taskforge}
+      # Detect on-disk corruption instead of silently returning bad pages.
+      POSTGRES_INITDB_ARGS: "--data-checksums"
+      # Force UTC everywhere. Every timestamp is timestamptz and every lease
+      # deadline is absolute; a container running in a local zone is a class of
+      # bug we simply refuse to have.
+      TZ: UTC
+      PGTZ: UTC
+    ports:
+      # Host side only. 5433 because a locally installed PostgreSQL commonly
+      # owns 5432, and the failure mode is nasty: the connection succeeds and
+      # then fails authentication against the wrong server.
+      - "${DB_PORT:-5433}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-taskforge} -d ${DB_NAME:-taskforge}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Migrations — one-shot, must run before api/worker
+  # -------------------------------------------------------------------------
+  migrate:
+    image: migrate/migrate:v4.19.0
+    depends_on: *app-depends
+    volumes:
+      - ./migrations:/migrations
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=postgres://${DB_USER:-taskforge}:${DB_PASSWORD:-taskforge}@postgres:5432/${DB_NAME:-taskforge}?sslmode=disable
+    command: ["up"]
+    # Migrations run as a deliberate step, never automatically on API startup.
+    # Several API replicas starting at once would race to apply the same
+    # migration, and a schema change would be tied to a deploy rather than being
+    # something you can roll out and roll back independently.
+    restart: "no"
+
+  # -------------------------------------------------------------------------
+  # API
+  # -------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      args:
+        TARGET: api
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      HTTP_ADDR: ":8080"
+      METRICS_REFRESH_INTERVAL: 5s
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      # The distroless image has no shell and no curl, so the healthcheck runs
+      # the app binary itself. Compose's default CMD-SHELL form would fail here.
+      test: ["CMD", "/app", "-healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Workers — scale with: docker compose up -d --scale worker=5
+  # -------------------------------------------------------------------------
+  worker:
+    build:
+      context: .
+      args:
+        TARGET: worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *app-env
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-5}
+      WORKER_POLL_INTERVAL: ${WORKER_POLL_INTERVAL:-1s}
+      WORKER_LEASE_DURATION: ${WORKER_LEASE_DURATION:-60s}
+      WORKER_REAPER_INTERVAL: ${WORKER_REAPER_INTERVAL:-30s}
+      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-10s}
+      WORKER_METRICS_ADDR: ":9091"
+      # Deliberately NOT set: WORKER_ID. Each container derives hostname-pid,
+      # and in Docker the hostname is the container id, so every replica gets a
+      # unique identity automatically and `--scale` just works.
+    # No published port: Prometheus reaches workers over the Compose network by
+    # DNS, and publishing would collide the moment you scale past one replica.
+    expose:
+      - "9091"
+    # SIGTERM is what `docker compose stop` sends. 40s gives the worker time to
+    # finish in-flight jobs (WORKER_SHUTDOWN_TIMEOUT defaults to 30s) before
+    # Docker escalates to SIGKILL.
+    stop_grace_period: 40s
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Prometheus
+  # -------------------------------------------------------------------------
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: taskforge-prometheus
+    volumes:
+      - ./deployments/prometheus:/etc/prometheus:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  # -------------------------------------------------------------------------
+  # Grafana
+  # -------------------------------------------------------------------------
+  grafana:
+    image: grafana/grafana:11.5.1
+    container_name: taskforge-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Anonymous viewing so the dashboard opens without a login prompt. This is
+      # a local demo stack; never do this on anything reachable.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./deployments/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deployments/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+    name: taskforge-postgres-data
+  prometheus-data:
+    name: taskforge-prometheus-data
+  grafana-data:
+    name: taskforge-grafana-data
