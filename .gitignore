@@ -29,4 +29,3 @@ desktop.ini
 # Go workspace files are developer-local
 go.work
 go.work.sum
-/docs

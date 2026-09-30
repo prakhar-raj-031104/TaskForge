@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TaskForge — Distributed Job Queue</title>
+<meta name="description" content="A durable background job queue built on Go and PostgreSQL — no Redis, no broker, no ORM. Interactive simulation of claim/lease/reclaim mechanics.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 24 24%22><rect width=%2224%22 height=%2224%22 rx=%225%22 fill=%22%2314b8a6%22/><path d=%22M6 12h5M13 8l4 4-4 4%22 stroke=%22%23fff%22 stroke-width=%222%22 fill=%22none%22 stroke-linecap=%22round%22 stroke-linejoin=%22round%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="noise-overlay" aria-hidden="true"></div>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a href="#top" class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none"><rect width="24" height="24" rx="6" fill="var(--accent)"/><path d="M6 12h5M13 8l4 4-4 4" stroke="#04120f" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span>TaskForge</span>
+    </a>
+    <nav class="main-nav">
+      <a href="#demo">Live Demo</a>
+      <a href="#how-it-works">How It Works</a>
+      <a href="#why-postgres">Why Postgres</a>
+      <a href="#benchmarks">Benchmarks</a>
+      <a href="#stack">Stack</a>
+    </nav>
+    <a class="btn btn-ghost" href="https://github.com/prakhar-raj-031104/TaskForge" target="_blank" rel="noopener">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      Source
+    </a>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- ============================================================ HERO -->
+  <section class="hero">
+    <div class="wrap hero-inner">
+      <p class="eyebrow">Go &middot; PostgreSQL &middot; No Redis, No Broker, No ORM</p>
+      <h1>A job queue that survives<br>the failures a toy one hides.</h1>
+      <p class="hero-lede">
+        Clients submit jobs over HTTP. Jobs are durably stored in PostgreSQL.
+        A fleet of worker processes claims and executes them concurrently with
+        <code>SELECT&nbsp;…&nbsp;FOR&nbsp;UPDATE&nbsp;SKIP&nbsp;LOCKED</code>,
+        crash-safe leases, fencing tokens, retries with jitter, and automatic
+        recovery when a worker dies mid-job.
+      </p>
+      <div class="hero-actions">
+        <a href="#demo" class="btn btn-primary">Run the live demo</a>
+        <a href="https://github.com/prakhar-raj-031104/TaskForge" target="_blank" rel="noopener" class="btn btn-ghost">View source</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ STATS -->
+  <section class="stats">
+    <div class="wrap stats-grid">
+      <div class="stat-card">
+        <div class="stat-num">15,858<span>/s</span></div>
+        <div class="stat-label">jobs claimed under parallel load (measured)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">138<span>×</span></div>
+        <div class="stat-label">faster claim query with the partial index</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">0<span> dupes</span></div>
+        <div class="stat-label">across 200 jobs, 16 concurrent workers, race-tested</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">27.8<span>MB</span></div>
+        <div class="stat-label">distroless production image size</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ARCHITECTURE -->
+  <section class="section">
+    <div class="wrap">
+      <h2 class="section-title">Architecture</h2>
+      <p class="section-lede">One source of truth. Everything else is a client of it.</p>
+
+      <div class="diagram-card">
+        <svg viewBox="0 0 920 260" class="arch-svg" role="img" aria-label="Architecture diagram: Client connects over HTTP to API, API and Workers both connect to PostgreSQL, Prometheus scrapes API and Workers, Grafana reads from Prometheus.">
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="var(--line)"/>
+            </marker>
+          </defs>
+
+          <!-- Client -->
+          <g transform="translate(20,95)">
+            <rect width="130" height="60" rx="10" class="node node-client"/>
+            <text x="65" y="35" text-anchor="middle" class="node-text">Client</text>
+          </g>
+
+          <!-- API -->
+          <g transform="translate(240,95)">
+            <rect width="130" height="60" rx="10" class="node node-api"/>
+            <text x="65" y="28" text-anchor="middle" class="node-text">api</text>
+            <text x="65" y="44" text-anchor="middle" class="node-subtext">HTTP · stdlib</text>
+          </g>
+
+          <!-- Postgres -->
+          <g transform="translate(470,80)">
+            <rect width="160" height="90" rx="10" class="node node-db"/>
+            <text x="80" y="38" text-anchor="middle" class="node-text">PostgreSQL</text>
+            <text x="80" y="56" text-anchor="middle" class="node-subtext">source of truth</text>
+          </g>
+
+          <!-- Workers -->
+          <g transform="translate(720,50)">
+            <rect width="170" height="34" rx="8" class="node node-worker"/>
+            <text x="85" y="22" text-anchor="middle" class="node-text-sm">worker-1</text>
+          </g>
+          <g transform="translate(720,113)">
+            <rect width="170" height="34" rx="8" class="node node-worker"/>
+            <text x="85" y="22" text-anchor="middle" class="node-text-sm">worker-2</text>
+          </g>
+          <g transform="translate(720,176)">
+            <rect width="170" height="34" rx="8" class="node node-worker"/>
+            <text x="85" y="22" text-anchor="middle" class="node-text-sm">worker-3 …N</text>
+          </g>
+
+          <!-- Prometheus / Grafana -->
+          <g transform="translate(240,205)">
+            <rect width="130" height="44" rx="8" class="node node-obs"/>
+            <text x="65" y="27" text-anchor="middle" class="node-text-sm">Prometheus</text>
+          </g>
+          <g transform="translate(20,205)">
+            <rect width="130" height="44" rx="8" class="node node-obs"/>
+            <text x="65" y="27" text-anchor="middle" class="node-text-sm">Grafana</text>
+          </g>
+
+          <!-- Edges -->
+          <line x1="150" y1="125" x2="236" y2="125" class="edge" marker-end="url(#arrow)"/>
+          <text x="193" y="115" text-anchor="middle" class="edge-label">HTTP</text>
+
+          <line x1="370" y1="120" x2="466" y2="115" class="edge" marker-end="url(#arrow)"/>
+
+          <path d="M630,100 C670,80 690,67 716,63" class="edge" fill="none" marker-end="url(#arrow)"/>
+          <path d="M630,125 C670,127 690,128 716,129" class="edge" fill="none" marker-end="url(#arrow)"/>
+          <path d="M630,150 C670,165 690,180 716,190" class="edge" fill="none" marker-end="url(#arrow)"/>
+
+          <line x1="150" y1="227" x2="236" y2="227" class="edge" marker-end="url(#arrow)"/>
+          <path d="M305,205 C305,150 300,140 300,155" class="edge" fill="none" marker-end="url(#arrow)"/>
+        </svg>
+        <p class="diagram-caption">
+          The API never claims jobs; workers never list them. Prometheus scrapes both,
+          Grafana reads Prometheus. Postgres is the only thing every path has in common —
+          on purpose.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ LIVE DEMO -->
+  <section class="section section-alt" id="demo">
+    <div class="wrap">
+      <h2 class="section-title">Live demo</h2>
+      <p class="section-lede">
+        This runs entirely in your browser — it mirrors the real state machine, claim
+        logic, lease/fencing mechanism and log format of the actual Go backend, so you
+        can see the failure-recovery behavior without a live server. Submit jobs, watch
+        three workers claim and process them, then kill a worker mid-job and watch
+        another one reclaim its work.
+      </p>
+
+      <div class="demo-shell">
+        <div class="demo-controls">
+          <button class="btn btn-primary" id="btn-submit-1">Submit 1 job</button>
+          <button class="btn btn-primary" id="btn-submit-10">Submit 10 jobs</button>
+          <button class="btn btn-danger" id="btn-flaky">Submit flaky job</button>
+          <button class="btn btn-ghost" id="btn-reset">Reset</button>
+        </div>
+
+        <div class="demo-board">
+          <div class="demo-col">
+            <div class="col-header">
+              <span>Pending queue</span>
+              <span class="badge" id="pending-count">0</span>
+            </div>
+            <div class="pending-list" id="pending-list" aria-live="polite"></div>
+          </div>
+
+          <div class="demo-col demo-col-wide">
+            <div class="col-header"><span>Workers</span></div>
+            <div class="workers-grid" id="workers-grid"></div>
+          </div>
+
+          <div class="demo-col">
+            <div class="col-header">
+              <span>Outcomes</span>
+            </div>
+            <div class="outcome-stats">
+              <div class="outcome-row">
+                <span class="dot dot-completed"></span> Completed
+                <strong id="completed-count">0</strong>
+              </div>
+              <div class="outcome-row">
+                <span class="dot dot-retry"></span> Retried
+                <strong id="retried-count">0</strong>
+              </div>
+              <div class="outcome-row">
+                <span class="dot dot-dead"></span> Dead-lettered
+                <strong id="dead-count">0</strong>
+              </div>
+              <div class="outcome-row">
+                <span class="dot dot-reclaimed"></span> Reclaimed
+                <strong id="reclaimed-count">0</strong>
+              </div>
+            </div>
+            <p class="demo-hint">Click a worker's kill icon to simulate a crash mid-job, then watch the reaper reclaim it after the lease expires.</p>
+          </div>
+        </div>
+
+        <div class="log-panel">
+          <div class="log-header">
+            <span>worker output</span>
+            <span class="log-dim">JSON logs, newest first</span>
+          </div>
+          <div class="log-body" id="log-body"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ HOW IT WORKS -->
+  <section class="section" id="how-it-works">
+    <div class="wrap">
+      <h2 class="section-title">How it works</h2>
+      <p class="section-lede">The two mechanisms that make a relational database a genuinely safe queue.</p>
+
+      <div class="mech-grid">
+        <div class="mech-card">
+          <h3>FOR UPDATE SKIP LOCKED</h3>
+          <p>Twenty workers poll the same table at once. This is what stops them from all claiming the same rows.</p>
+          <table class="compare-table">
+            <tr><th>Approach</th><th>Result</th></tr>
+            <tr><td>SELECT then UPDATE</td><td class="bad">Same job runs 20 times</td></tr>
+            <tr><td>SELECT … FOR UPDATE</td><td class="warn">Correct, but serialized — no throughput gain</td></tr>
+            <tr><td>SERIALIZABLE</td><td class="warn">Correct, but workers burn CPU retrying conflicts</td></tr>
+            <tr><td>SKIP LOCKED</td><td class="good">No blocking, no duplicates, scales with workers</td></tr>
+          </table>
+          <pre class="code-block"><code>WITH claimed AS (
+  SELECT id FROM jobs
+   WHERE status='pending' AND available_at &lt;= now()
+   ORDER BY priority DESC, available_at ASC, id ASC
+   FOR UPDATE SKIP LOCKED LIMIT $1
+)
+UPDATE jobs SET status='running', lease_epoch = lease_epoch + 1, …
+  FROM claimed WHERE jobs.id = claimed.id
+RETURNING …</code></pre>
+        </div>
+
+        <div class="mech-card">
+          <h3>Leases + fencing tokens</h3>
+          <p>The failure a naive lease misses: a worker doesn't crash, it <em>freezes</em> (GC pause, VM suspend), then wakes up and tries to write a result for a job someone else now owns.</p>
+          <ol class="timeline">
+            <li><span class="t">t=0</span> worker-A claims job J, lease 30s</li>
+            <li><span class="t">t=5</span> worker-A freezes</li>
+            <li><span class="t">t=31</span> reaper reclaims J → pending</li>
+            <li><span class="t">t=32</span> worker-B claims J, epoch bumped to 2</li>
+            <li><span class="t bad-t">t=33</span> worker-A wakes, tries to complete J with epoch 1</li>
+          </ol>
+          <pre class="code-block"><code>UPDATE jobs SET status='completed', …
+ WHERE id=$1 AND worker_id=$2
+   AND lease_epoch=$3 AND status='running'
+-- worker-A's epoch is stale → matches 0 rows
+-- it learns it lost, discards its result</code></pre>
+          <p class="mech-note">This doesn't stop the side effect happening twice (worker-A may have already sent an email) — which is why the guarantee is <strong>at-least-once</strong>, and handlers must be idempotent.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ WHY POSTGRES -->
+  <section class="section section-alt" id="why-postgres">
+    <div class="wrap">
+      <h2 class="section-title">Why PostgreSQL, not Redis or Kafka</h2>
+      <p class="section-lede">Two reasons that matter more than raw throughput.</p>
+
+      <div class="reason-grid">
+        <div class="reason-card">
+          <h3>One transaction, not two systems</h3>
+          <p>A job's state change and the business row it produces can commit in the <em>same</em> Postgres transaction. With Redis as the queue, those are two separate systems and you must build reconciliation between them.</p>
+        </div>
+        <div class="reason-card">
+          <h3>Durability by default</h3>
+          <p>Redis's default persistence can lose the last fsync window. For a queue, that means silently losing accepted work — unacceptable for something like a payment confirmation.</p>
+        </div>
+        <div class="reason-card">
+          <h3>Conceded: Redis is faster</h3>
+          <p>The position taken is "PostgreSQL until measurements say otherwise" — and it's backed by the benchmark numbers below, not a guess.</p>
+        </div>
+      </div>
+
+      <p class="section-footnote">
+        <strong>When Redis/Kafka would actually get introduced:</strong> when claim latency stops
+        being dominated by the network round trip and starts being dominated by lock
+        contention on the index — or when the real need is fan-out to independent
+        consumers, which is a log, not a queue.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ BENCHMARKS -->
+  <section class="section" id="benchmarks">
+    <div class="wrap">
+      <h2 class="section-title">Benchmarks</h2>
+      <p class="section-lede">Measured, not estimated — reproducible with the commands in the repo.</p>
+
+      <div class="table-wrap">
+        <table class="bench-table">
+          <thead>
+            <tr><th>Benchmark</th><th>ms/op</th><th>Throughput</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Create</td><td>2.65</td><td>377 jobs/s</td></tr>
+            <tr><td>Claim / batch=1</td><td>2.64</td><td>379 jobs/s</td></tr>
+            <tr><td>Claim / batch=20</td><td>3.47</td><td>5,772 jobs/s</td></tr>
+            <tr><td>Claim / batch=50</td><td>3.98</td><td><strong>12,564 jobs/s</strong></td></tr>
+            <tr><td>ClaimParallel (10/batch, 12 threads)</td><td>0.63</td><td><strong>15,858 jobs/s</strong></td></tr>
+            <tr><td>ClaimWithAging / batch=20</td><td>133.44</td><td>150 jobs/s <span class="footnote-tag">38× cost — off by default</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="section-footnote">
+        The database round trip is 99.7% of total latency — <code>ServiceCreate</code> against an
+        in-memory repository takes 6.8µs; the same call against real PostgreSQL takes 2,652µs.
+        Optimising the Go code further would be pointless; the round trip is what matters.
+      </p>
+    </div>
+  </section>
+
+  <!-- ============================================================ STACK -->
+  <section class="section section-alt" id="stack">
+    <div class="wrap">
+      <h2 class="section-title">Stack</h2>
+      <div class="stack-grid">
+        <div class="stack-item"><h4>Go 1.26</h4><p>Goroutines + channels give a structural concurrency bound — a buffered channel as a semaphore, not a thread pool library.</p></div>
+        <div class="stack-item"><h4>PostgreSQL 16 + pgx/v5</h4><p>No ORM. Raw SQL because the correctness lives in <code>SKIP LOCKED</code>, partial indexes and CHECK constraints.</p></div>
+        <div class="stack-item"><h4>net/http stdlib</h4><p>Go 1.22's <code>ServeMux</code> got method + wildcard routing, so no router dependency was needed.</p></div>
+        <div class="stack-item"><h4>log/slog</h4><p>Structured JSON logs; a custom <code>LogValuer</code> makes the DB password structurally unable to leak into logs.</p></div>
+        <div class="stack-item"><h4>Prometheus + Grafana</h4><p>Custom business metrics like queue age, not just infra metrics.</p></div>
+        <div class="stack-item"><h4>Docker + Compose</h4><p>Multi-stage distroless builds, 27.8MB images, horizontal worker scaling via <code>--scale</code>.</p></div>
+        <div class="stack-item"><h4>golang-migrate</h4><p>Schema migrations run as a deliberate one-shot step, never automatically on API boot.</p></div>
+        <div class="stack-item"><h4>k6</h4><p>Load testing with a constant-arrival-rate executor, not fixed VUs — so a slowing server doesn't hide overload behind less load.</p></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <p>Built by Prakhar Raj Singhal &middot; <a href="https://github.com/prakhar-raj-031104/TaskForge" target="_blank" rel="noopener">Source on GitHub</a></p>
+    <p class="footer-dim">MIT Licensed</p>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
