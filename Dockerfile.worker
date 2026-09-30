@@ -1,0 +1,20 @@
+# Render-specific build of the worker binary. See Dockerfile.api for why this
+# duplicates Dockerfile instead of using a build ARG.
+
+FROM golang:1.26.5 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+        -trimpath \
+        -tags timetzdata \
+        -ldflags="-s -w -X main.version=${VERSION}" \
+        -o /out/app ./cmd/worker
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/app /app
+USER nonroot:nonroot
+EXPOSE 9091
+ENTRYPOINT ["/app"]

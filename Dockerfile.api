@@ -1,0 +1,27 @@
+# Render-specific build of the api binary.
+#
+# This duplicates Dockerfile rather than passing --build-arg TARGET=api,
+# because Render Blueprints build from a dockerfilePath with no reliable way
+# to pass build ARGs at this time, and a deploy config that silently builds
+# the wrong binary is a worse failure mode than one extra file. Everything
+# else — distroless runtime, non-root user, trimmed/stripped binary — is
+# identical to Dockerfile; see its comments for why each line is there.
+# docker-compose.yml continues to use the parameterised Dockerfile directly.
+
+FROM golang:1.26.5 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=dev
+RUN CGO_ENABLED=0 GOOS=linux go build \
+        -trimpath \
+        -tags timetzdata \
+        -ldflags="-s -w -X main.version=${VERSION}" \
+        -o /out/app ./cmd/api
+
+FROM gcr.io/distroless/static-debian12:nonroot
+COPY --from=build /out/app /app
+USER nonroot:nonroot
+EXPOSE 8080
+ENTRYPOINT ["/app"]

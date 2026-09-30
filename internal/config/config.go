@@ -61,6 +61,12 @@ type HTTP struct {
 	// should be at or below the Prometheus scrape interval, otherwise
 	// consecutive scrapes read the same stale value.
 	MetricsInterval time.Duration
+
+	// CORSAllowedOrigins is the explicit set of browser origins permitted to
+	// call this API cross-origin. Empty means CORS is off — every
+	// cross-origin request is refused, which is the correct default for an
+	// API with no auth layer in front of it.
+	CORSAllowedOrigins []string
 }
 
 // Database configures the PostgreSQL connection pool.
@@ -76,6 +82,16 @@ type Database struct {
 	ConnMaxLifetime time.Duration
 	ConnMaxIdleTime time.Duration
 	ConnectTimeout  time.Duration
+
+	// RunMigrationsOnBoot applies embedded migrations at process startup.
+	// Off by default: docker-compose.yml applies migrations as its own
+	// deliberate one-shot step (see the comment on the migrate service
+	// there), specifically so that several replicas booting at once never
+	// race to apply the same migration. A single-instance PaaS deployment
+	// has exactly one replica by construction, so that race cannot happen,
+	// and there is no shell in the distroless image to run a separate
+	// migrate container against — this is the escape hatch for that case.
+	RunMigrationsOnBoot bool
 }
 
 // Worker configures a single worker process.
@@ -183,8 +199,9 @@ func load(lookup LookupFunc) (Config, error) {
 			WriteTimeout:    l.Duration("HTTP_WRITE_TIMEOUT", 10*time.Second),
 			IdleTimeout:     l.Duration("HTTP_IDLE_TIMEOUT", 60*time.Second),
 			ShutdownTimeout: l.Duration("HTTP_SHUTDOWN_TIMEOUT", 15*time.Second),
-			MaxBodyBytes:    l.Int64("HTTP_MAX_BODY_BYTES", 64<<10), // 64 KiB
-			MetricsInterval: l.Duration("METRICS_REFRESH_INTERVAL", 10*time.Second),
+			MaxBodyBytes:       l.Int64("HTTP_MAX_BODY_BYTES", 64<<10), // 64 KiB
+			MetricsInterval:    l.Duration("METRICS_REFRESH_INTERVAL", 10*time.Second),
+			CORSAllowedOrigins: l.StringList("HTTP_CORS_ALLOWED_ORIGINS"),
 		},
 		Database: Database{
 			Host:            l.String("DB_HOST", "localhost"),
@@ -198,6 +215,8 @@ func load(lookup LookupFunc) (Config, error) {
 			ConnMaxLifetime: l.Duration("DB_CONN_MAX_LIFETIME", 30*time.Minute),
 			ConnMaxIdleTime: l.Duration("DB_CONN_MAX_IDLE_TIME", 5*time.Minute),
 			ConnectTimeout:  l.Duration("DB_CONNECT_TIMEOUT", 5*time.Second),
+
+			RunMigrationsOnBoot: l.Bool("DB_RUN_MIGRATIONS_ON_BOOT", false),
 		},
 		Worker: Worker{
 			ID:                l.String("WORKER_ID", ""),
@@ -432,6 +451,24 @@ func (l *loader) String(key, def string) string {
 		return strings.TrimSpace(v)
 	}
 	return def
+}
+
+// StringList returns key split on commas, trimming whitespace around each
+// element and dropping empty ones. An unset variable yields an empty (not
+// nil) slice, so callers can range over it without a nil check.
+func (l *loader) StringList(key string) []string {
+	raw := l.String(key, "")
+	if raw == "" {
+		return []string{}
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // Enum returns the value of key, requiring it to be one of allowed.

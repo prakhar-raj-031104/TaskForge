@@ -20,6 +20,9 @@ type Config struct {
 	// WorkerStaleAfter is how long without a heartbeat before a worker is
 	// reported as not alive. Derived from the heartbeat interval by the caller.
 	WorkerStaleAfter time.Duration
+	// CORSAllowedOrigins is passed straight to middleware.CORS. Empty disables
+	// cross-origin requests entirely.
+	CORSAllowedOrigins []string
 }
 
 // Deps are the router's collaborators.
@@ -75,6 +78,9 @@ func NewRouter(cfg Config, deps Deps) http.Handler {
 	//   Logger      wrap the writer and start the timer, so it observes the
 	//               final status including one written by Recover
 	//   Recover     inside Logger, so a panic still produces one access log line
+	//   CORS        answers preflight OPTIONS directly here, before Metrics or
+	//               the mux see it — a preflight matches no registered route
+	//               and would otherwise become a 405
 	//   Metrics     after Recover so a panic is counted as the 500 it becomes
 	//   Timeout     bounds handler work, not time spent logging
 	//   JSONErrors  innermost, wrapping the mux itself, because the responses
@@ -83,6 +89,7 @@ func NewRouter(cfg Config, deps Deps) http.Handler {
 		middleware.RequestID(),
 		middleware.Logger(deps.Log),
 		middleware.Recover(),
+		middleware.CORS(cfg.CORSAllowedOrigins),
 		// The resolver closes over the mux so the metrics label is the route
 		// pattern rather than the raw path. See middleware.Metrics for why
 		// reading r.Pattern here would not work.

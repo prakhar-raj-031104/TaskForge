@@ -306,6 +306,62 @@ a { color: inherit; }
   padding: 24px;
   box-shadow: var(--shadow-lg);
 }
+.mode-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
+}
+.mode-toggle {
+  display: inline-flex;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.mode-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+.mode-btn:disabled { opacity: 0.5; cursor: wait; }
+.mode-status {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mode-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.mode-dot-sim { background: var(--text-faint); }
+.mode-dot-connecting { background: var(--warn); animation: pulse 1s ease-in-out infinite; }
+.mode-dot-live { background: var(--good); }
+.mode-dot-error { background: var(--danger); }
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 .demo-controls {
   display: flex;
   flex-wrap: wrap;

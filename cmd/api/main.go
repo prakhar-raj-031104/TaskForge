@@ -21,6 +21,7 @@ import (
 	"github.com/anjani-kr-singh-ai/taskforge/internal/httpx"
 	"github.com/anjani-kr-singh-ai/taskforge/internal/job"
 	jobpg "github.com/anjani-kr-singh-ai/taskforge/internal/job/postgres"
+	"github.com/anjani-kr-singh-ai/taskforge/internal/migrate"
 	"github.com/anjani-kr-singh-ai/taskforge/internal/observability/logging"
 	"github.com/anjani-kr-singh-ai/taskforge/internal/observability/metrics"
 	"github.com/anjani-kr-singh-ai/taskforge/internal/observability/queuemetrics"
@@ -134,6 +135,12 @@ func run() error {
 
 	log.Info("database connected", "dsn", cfg.Database.RedactedDSN())
 
+	if cfg.Database.RunMigrationsOnBoot {
+		if err := migrate.Run(startupCtx, pool, log); err != nil {
+			return fmt.Errorf("running migrations: %w", err)
+		}
+	}
+
 	// Dependency injection, by hand, in one place. The repository knows about
 	// pgx, the service knows about the repository interface, the router knows
 	// about the service. No globals, no container, no init() magic — you can
@@ -155,7 +162,8 @@ func run() error {
 		// beat is a hiccup; three is a pattern. Deriving this from the interval
 		// means tuning the interval cannot accidentally mark the whole fleet
 		// dead.
-		WorkerStaleAfter: 3 * cfg.Worker.HeartbeatInterval,
+		WorkerStaleAfter:   3 * cfg.Worker.HeartbeatInterval,
+		CORSAllowedOrigins: cfg.HTTP.CORSAllowedOrigins,
 	}, api.Deps{
 		Jobs:    jobService,
 		Workers: repo,

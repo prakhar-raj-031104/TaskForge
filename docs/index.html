@@ -162,15 +162,26 @@
   <section class="section section-alt" id="demo">
     <div class="wrap">
       <h2 class="section-title">Live demo</h2>
-      <p class="section-lede">
-        This runs entirely in your browser — it mirrors the real state machine, claim
-        logic, lease/fencing mechanism and log format of the actual Go backend, so you
-        can see the failure-recovery behavior without a live server. Submit jobs, watch
-        three workers claim and process them, then kill a worker mid-job and watch
-        another one reclaim its work.
+      <p class="section-lede" id="demo-lede">
+        Simulated mode runs entirely in your browser — it mirrors the real state machine,
+        claim logic, lease/fencing mechanism and log format of the actual Go backend, so
+        you can see the failure-recovery behavior with nothing to wait on. Switch to
+        <strong>Live backend</strong> to hit the real deployed API instead — same buttons,
+        real PostgreSQL, real workers.
       </p>
 
       <div class="demo-shell">
+        <div class="mode-bar">
+          <div class="mode-toggle" role="tablist" aria-label="Demo data source">
+            <button class="mode-btn active" id="mode-simulated" role="tab" aria-selected="true">Simulated</button>
+            <button class="mode-btn" id="mode-live" role="tab" aria-selected="false">Live backend</button>
+          </div>
+          <div class="mode-status" id="mode-status">
+            <span class="mode-dot mode-dot-sim"></span>
+            Running fully in your browser — no server required.
+          </div>
+        </div>
+
         <div class="demo-controls">
           <button class="btn btn-primary" id="btn-submit-1">Submit 1 job</button>
           <button class="btn btn-primary" id="btn-submit-10">Submit 10 jobs</button>
@@ -198,23 +209,23 @@
             </div>
             <div class="outcome-stats">
               <div class="outcome-row">
-                <span class="dot dot-completed"></span> Completed
+                <span class="dot dot-completed"></span> <span id="label-completed">Completed</span>
                 <strong id="completed-count">0</strong>
               </div>
               <div class="outcome-row">
-                <span class="dot dot-retry"></span> Retried
+                <span class="dot dot-retry"></span> <span id="label-retried">Retried</span>
                 <strong id="retried-count">0</strong>
               </div>
               <div class="outcome-row">
-                <span class="dot dot-dead"></span> Dead-lettered
+                <span class="dot dot-dead"></span> <span id="label-dead">Dead-lettered</span>
                 <strong id="dead-count">0</strong>
               </div>
               <div class="outcome-row">
-                <span class="dot dot-reclaimed"></span> Reclaimed
+                <span class="dot dot-reclaimed"></span> <span id="label-reclaimed">Reclaimed</span>
                 <strong id="reclaimed-count">0</strong>
               </div>
             </div>
-            <p class="demo-hint">Click a worker's kill icon to simulate a crash mid-job, then watch the reaper reclaim it after the lease expires.</p>
+            <p class="demo-hint" id="demo-hint">Click a worker's kill icon to simulate a crash mid-job, then watch the reaper reclaim it after the lease expires.</p>
           </div>
         </div>
 

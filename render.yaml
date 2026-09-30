@@ -1,0 +1,98 @@
+# Render Blueprint — provisions the database, API and worker in one pass.
+#
+# This deploys a SINGLE instance of each service, which is precisely the case
+# the README's "no LISTEN/NOTIFY, no leader election" tradeoffs already
+# assume is fine, and the one case where DB_RUN_MIGRATIONS_ON_BOOT is safe
+# (see internal/migrate/migrate.go): with exactly one api replica, the
+# multi-replica migration race that docker-compose.yml's separate migrate
+# step exists to avoid cannot happen.
+#
+# The frontend (docs/) is deployed separately as a Render Static Site via the
+# dashboard — see README for why it is not in this blueprint.
+#
+# To deploy: Render dashboard -> New -> Blueprint -> select this repository.
+
+databases:
+  - name: taskforge-db
+    databaseName: taskforge
+    user: taskforge
+    plan: free
+    region: oregon
+
+services:
+  # ---------------------------------------------------------------------
+  # API
+  # ---------------------------------------------------------------------
+  - type: web
+    name: taskforge-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile.api
+    dockerContext: .
+    plan: free
+    region: oregon
+    healthCheckPath: /api/v1/ready
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_FORMAT
+        value: json
+      - key: HTTP_ADDR
+        value: :8080
+      - key: DB_HOST
+        fromDatabase: { name: taskforge-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: taskforge-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: taskforge-db, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: taskforge-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: taskforge-db, property: database }
+      - key: DB_SSLMODE
+        value: require
+      # Single replica by construction on Render's free plan — see the note
+      # at the top of this file for why that makes this safe.
+      - key: DB_RUN_MIGRATIONS_ON_BOOT
+        value: "true"
+      # Update this after the frontend is deployed (Render Static Site, or
+      # the GitHub Pages showcase) to the real origin(s), comma-separated.
+      # Empty/unset means CORS stays off and every cross-origin request is
+      # refused — the closed-by-default posture described in cors.go.
+      - key: HTTP_CORS_ALLOWED_ORIGINS
+        value: https://prakhar-raj-031104.github.io
+
+  # ---------------------------------------------------------------------
+  # Worker
+  # ---------------------------------------------------------------------
+  - type: worker
+    name: taskforge-worker
+    runtime: docker
+    dockerfilePath: ./Dockerfile.worker
+    dockerContext: .
+    plan: free
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: info
+      - key: LOG_FORMAT
+        value: json
+      - key: DB_HOST
+        fromDatabase: { name: taskforge-db, property: host }
+      - key: DB_PORT
+        fromDatabase: { name: taskforge-db, property: port }
+      - key: DB_USER
+        fromDatabase: { name: taskforge-db, property: user }
+      - key: DB_PASSWORD
+        fromDatabase: { name: taskforge-db, property: password }
+      - key: DB_NAME
+        fromDatabase: { name: taskforge-db, property: database }
+      - key: DB_SSLMODE
+        value: require
+      # A single free-tier instance has no headroom to spare on concurrent
+      # jobs; keep this modest so DB_MAX_CONNS (default 10) comfortably
+      # covers WORKER_CONCURRENCY + 1 (see config.go's validate()).
+      - key: WORKER_CONCURRENCY
+        value: "3"
